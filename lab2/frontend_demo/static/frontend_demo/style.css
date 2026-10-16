@@ -1,13 +1,13 @@
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #eef2f5; /* jasnoszary/błękitny */
+    background-color: #eef2f5; 
     color: #333333;
     margin: 0;
     padding: 0;
 }
 
 header {
-    background-color: #2c3e50; /* elegancki ciemny granat */
+    background-color: #2c3e50;
     color: white;
     text-align: center;
     padding: 25px 15px;

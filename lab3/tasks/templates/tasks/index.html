@@ -1,0 +1,228 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zadanie: TaskBoard</title>
+    <link rel="stylesheet" href="{% static 'tasks/style.css' %}">
+</head>
+<body>
+
+    <div class="container">
+        <h1>TaskBoard</h1>
+
+        <!-- podsumowanie liczby zadań -->
+        <div class="summary">
+            Wszystkie zadania: <strong id="count-total">0</strong> | 
+            Ukończone: <strong id="count-completed">0</strong>
+        </div>
+
+        <!-- pole komunikatów błędów i walidacji -->
+        <div id="message-box"></div>
+
+        <!-- formularz dodawania zadania -->
+        <form id="task-form">
+            {% csrf_token %}
+            <input type="text" id="task-input" placeholder="Wpisz treść zadania...">
+            <button type="submit">Dodaj zadanie</button>
+        </form>
+
+        <!-- przyciski filtrów -->
+        <div class="filters">
+            <button type="button" class="btn-filter active" data-filter="all">Wszystkie</button>
+            <button type="button" class="btn-filter" data-filter="active">Aktywne</button>
+            <button type="button" class="btn-filter" data-filter="completed">Ukończone</button>
+        </div>
+
+        <!-- lista zadań wygenerowana w DOM -->
+        <ul id="task-list"></ul>
+    </div>
+
+    <script>
+        //tablica obiektów i bieżący filtr
+        let allTasks = [];
+        let currentFilter = 'all';
+
+        //pobranie tokenu CSRF
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+        //referencje do elementów DOM
+        const taskForm = document.getElementById('task-form');
+        const taskInput = document.getElementById('task-input');
+        const taskList = document.getElementById('task-list');
+        const messageBox = document.getElementById('message-box');
+        const filterButtons = document.querySelectorAll('.btn-filter');
+        const countTotal = document.getElementById('count-total');
+        const countCompleted = document.getElementById('count-completed');
+
+        //funkcja wyświetlania komunikatów i błędów API
+        function showMessage(text, isError = true) {
+            messageBox.textContent = text;
+            messageBox.className = isError ? 'msg-error' : 'msg-success';
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, 3000);
+        }
+
+        //pobieranie listy zadań (GET)
+        async function loadTasks() {
+            try {
+                const response = await fetch('/api/tasks/');
+                if (!response.ok) {
+                    throw new Error('Błąd serwera: nie udało się pobrać zadań.');
+                }
+                allTasks = await response.json();
+                renderTasks();
+            } catch (error) {
+                showMessage(error.message, true);
+            }
+        }
+
+        //renderowanie listy w DOM (użycie textContent)
+        function renderTasks() {
+            taskList.innerHTML = '';
+
+            const filteredTasks = allTasks.filter(task => {
+                if (currentFilter === 'active') return !task.completed;
+                if (currentFilter === 'completed') return task.completed;
+                return true;
+            });
+
+            filteredTasks.forEach(task => {
+                const li = document.createElement('li');
+                if (task.completed) {
+                    li.classList.add('completed');
+                }
+
+                //checkbox statusu
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = task.completed;
+                checkbox.addEventListener('change', () => toggleTaskStatus(task.id, checkbox.checked));
+
+                //bezpieczne wstawienie tekstu użytkownika przez textContent
+                const span = document.createElement('span');
+                span.className = 'task-title';
+                span.textContent = task.title;
+
+                //przycisk usuwania
+                const deleteBtn = document.createElement('button');
+                deleteBtn.type = 'button';
+                deleteBtn.className = 'btn-delete';
+                deleteBtn.textContent = 'Usuń';
+                deleteBtn.addEventListener('click', () => deleteTask(task.id));
+
+                li.appendChild(checkbox);
+                li.appendChild(span);
+                li.appendChild(deleteBtn);
+                taskList.appendChild(li);
+            });
+
+            updateCounters();
+        }
+
+        //aktualizacja liczników zadań
+        function updateCounters() {
+            countTotal.textContent = allTasks.length;
+            countCompleted.textContent = allTasks.filter(task => task.completed).length;
+        }
+
+        //dodawanie nowego zadania (POST z bezpośrednią walidacją API)
+        taskForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const title = taskInput.value.trim();
+
+            try {
+                const response = await fetch('/api/tasks/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
+                    },
+                    body: JSON.stringify({ title: title })
+                });
+
+                const result = await response.json();
+
+                // Obsługa błędu zwróconego przez API (np. kod 400 Bad Request przy pustym polu)
+                if (!response.ok) {
+                    throw new Error(result.error || 'Błąd podczas zapisu zadania.');
+                }
+
+                allTasks.unshift(result);
+                taskInput.value = '';
+                renderTasks();
+                showMessage('Zadanie dodane pomyślnie.', false);
+            } catch (error) {
+                //wyświetlenie błędu API na czerwonym pasku
+                showMessage(error.message, true);
+            }
+        });
+
+        //zmiana statusu zadania (PATCH)
+        async function toggleTaskStatus(id, newStatus) {
+            try {
+                const response = await fetch(`/api/tasks/${id}/`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
+                    },
+                    body: JSON.stringify({ completed: newStatus })
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Błąd podczas zmiany statusu.');
+                }
+
+                const task = allTasks.find(t => t.id === id);
+                if (task) {
+                    task.completed = result.completed;
+                }
+                renderTasks();
+            } catch (error) {
+                showMessage(error.message, true);
+                loadTasks();
+            }
+        }
+
+        //usuwanie zadania (DELETE)
+        async function deleteTask(id) {
+            try {
+                const response = await fetch(`/api/tasks/${id}/`, {
+                    method: 'DELETE',
+                    headers: {
+                        'X-CSRFToken': csrfToken
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Błąd podczas usuwania zadania.');
+                }
+
+                allTasks = allTasks.filter(t => t.id !== id);
+                renderTasks();
+                showMessage('Zadanie zostało usunięte.', false);
+            } catch (error) {
+                showMessage(error.message, true);
+            }
+        }
+
+        //obsługa filtrowania
+        filterButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                filterButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                currentFilter = button.dataset.filter;
+                renderTasks();
+            });
+        });
+
+        // Pobranie danych po załadowaniu strony
+        document.addEventListener('DOMContentLoaded', loadTasks);
+    </script>
+</body>
+</html>
